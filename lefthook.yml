@@ -1,0 +1,18 @@
+commit-msg:
+  parallel: false
+  commands:
+    commitlint:
+      run: bunx --bun commitlint --edit {1}
+
+pre-commit:
+  parallel: true
+  commands:
+    lint-staged:
+      run: bun run lint-staged
+
+prepare-commit-msg:
+  commands:
+    commitizen:
+      interactive: true
+      skip_empty: true
+      run: exec < /dev/tty && node_modules/.bin/cz --hook || true
