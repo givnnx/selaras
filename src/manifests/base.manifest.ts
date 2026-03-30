@@ -60,5 +60,5 @@ export const baseManifest = {
       },
     },
   },
-  permissions: ['activeTab'],
+  permissions: ['activeTab', 'storage'],
 } satisfies Manifest

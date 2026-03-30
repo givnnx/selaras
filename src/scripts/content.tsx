@@ -1,5 +1,11 @@
 import { AppMessagesListener } from '@/messages/AppMessagesListener'
 import { type FrameConfig, mountFrame, unmountIframe } from './iframe.config'
+import { initFormTracker, restoreFormFromDraft } from '@/content/formTracker'
+import { initOfflineNavigation } from '@/content/domSnapshot'
+import { initSyncManager } from '@/content/syncManager'
+import { SyncOverlay } from '@/components/SyncOverlay'
+import { createRoot } from 'react-dom/client'
+import React from 'react'
 
 export const frameConfig: FrameConfig = {
   iframe: {
@@ -34,3 +40,25 @@ window.addEventListener('message', (event) => {
     openOrCloseExtension()
   }
 })
+
+// =============================================
+// Inisialisasi Logika Offline (berjalan di halaman web, bukan iframe)
+// =============================================
+initFormTracker()
+restoreFormFromDraft()
+initOfflineNavigation()
+initSyncManager()
+
+// Inject SyncOverlay (notifikasi offline/sinkronisasi) langsung ke DOM halaman
+const mountSyncOverlay = () => {
+  const container = document.createElement('div')
+  container.id = 'selaras-offline-overlay-root'
+  document.body.appendChild(container)
+  createRoot(container).render(React.createElement(SyncOverlay))
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', mountSyncOverlay)
+} else {
+  mountSyncOverlay()
+}

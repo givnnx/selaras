@@ -15,4 +15,5 @@ prepare-commit-msg:
     commitizen:
       interactive: true
       skip_empty: true
-      run: exec < /dev/tty && node_modules/.bin/cz --hook || true
+      run: (test -t 0 && node_modules/.bin/cz --hook) || true
+
