@@ -1,31 +1,58 @@
 import { getUICache, saveUICache, type UICache } from '../lib/db'
 
 // ==========================================
+// Konfigurasi: Domain yang boleh di-cache
+// ==========================================
+const ALLOWED_HOSTNAMES = ['selaras.tubankab.go.id']
+
+function isAllowedHost(): boolean {
+  return ALLOWED_HOSTNAMES.includes(window.location.hostname)
+}
+
+// ==========================================
 // 1. Fungsi Mengambil "Snapshot" Tampilan Web
 // ==========================================
 export async function cacheCurrentUI(): Promise<void> {
+  // Jangan cache jika bukan di domain Selaras
+  if (!isAllowedHost()) return
+
   // Pastikan kita sedang online sebelum memotret UI
   if (!navigator.onLine) return
 
   const currentPath = window.location.pathname
 
   // Targetkan elemen utama web Selaras Tuban
-  const mainPanel = document.querySelector('.main-panel')
-  const sidebar = document.querySelector('.sidebar')
+  // Coba selector spesifik dulu, fallback ke body jika tidak ada
+  const mainPanel =
+    document.querySelector('.main-panel') ??
+    document.querySelector('main') ??
+    document.querySelector('#app') ??
+    document.querySelector('#content')
 
-  if (mainPanel && sidebar) {
-    const cacheData: UICache = {
-      pagePath: currentPath,
-      html_main: mainPanel.innerHTML,
-      html_sidebar: sidebar.innerHTML,
-      timestamp: Date.now(),
-    }
+  const sidebar =
+    document.querySelector('.sidebar') ??
+    document.querySelector('nav') ??
+    document.querySelector('aside')
 
-    await saveUICache(cacheData)
-    console.log(
-      `📸 [Selaras Offline] Tampilan halaman ${currentPath} berhasil di-cache!`,
+  if (!mainPanel) {
+    console.warn(
+      '⚠️ [Selaras Offline] Selector .main-panel / main / #app / #content tidak ditemukan. ' +
+        'Cache dibatalkan. Periksa selector di domSnapshot.ts.',
     )
+    return
   }
+
+  const cacheData: UICache = {
+    pagePath: currentPath,
+    html_main: mainPanel.innerHTML,
+    html_sidebar: sidebar?.innerHTML ?? '',
+    timestamp: Date.now(),
+  }
+
+  await saveUICache(cacheData)
+  console.log(
+    `📸 [Selaras Offline] Tampilan halaman ${currentPath} berhasil di-cache!`,
+  )
 }
 
 // ==========================================
@@ -35,13 +62,23 @@ async function injectOfflineUI(targetPath: string): Promise<void> {
   const cache = await getUICache(targetPath)
 
   if (cache) {
-    const mainPanel = document.querySelector('.main-panel')
-    const sidebar = document.querySelector('.sidebar')
+    const mainPanel =
+      document.querySelector('.main-panel') ??
+      document.querySelector('main') ??
+      document.querySelector('#app') ??
+      document.querySelector('#content')
 
-    if (mainPanel && sidebar) {
-      // Ganti konten HTML saat ini dengan yang ada di cache
+    if (mainPanel) {
       mainPanel.innerHTML = cache.html_main
-      sidebar.innerHTML = cache.html_sidebar
+
+      // Pulihkan sidebar jika ada dan cache-nya tersimpan
+      if (cache.html_sidebar) {
+        const sidebar =
+          document.querySelector('.sidebar') ??
+          document.querySelector('nav') ??
+          document.querySelector('aside')
+        if (sidebar) sidebar.innerHTML = cache.html_sidebar
+      }
 
       // Update URL di address bar tanpa melakukan reload
       window.history.pushState({}, '', targetPath)
@@ -50,13 +87,17 @@ async function injectOfflineUI(targetPath: string): Promise<void> {
         `🔀 [Selaras Offline] Navigasi offline ke ${targetPath} berhasil.`,
       )
 
-      // Catatan: Karena DOM baru saja diganti secara paksa,
-      // kita harus memicu ulang event agar plugin seperti Select2 atau script form bisa jalan lagi.
+      // Picu ulang event agar plugin seperti Select2 atau script form bisa jalan lagi
       document.dispatchEvent(new CustomEvent('offline-ui-loaded'))
     }
   } else {
-    alert(
-      'Halaman ini belum pernah dibuka sebelumnya saat online. Tidak ada cache yang tersedia.',
+    console.warn(
+      `⚠️ [Selaras Offline] Tidak ada cache untuk ${targetPath}. ` +
+        'Halaman ini belum pernah dibuka saat online.',
+    )
+    // Tampilkan pesan di halaman, bukan alert() yang mengganggu
+    window.dispatchEvent(
+      new CustomEvent('selaras-cache-miss', { detail: { path: targetPath } }),
     )
   }
 }
@@ -65,10 +106,19 @@ async function injectOfflineUI(targetPath: string): Promise<void> {
 // 3. Fungsi Mencegat Klik (Interceptor)
 // ==========================================
 export function initOfflineNavigation(): void {
-  // Simpan tampilan saat halaman pertama kali dimuat
-  window.addEventListener('load', () => {
+  // Jangan aktifkan di luar domain Selaras
+  if (!isAllowedHost()) return
+
+  // Content script diinjeksi di document_idle (setelah load selesai).
+  // Gunakan readyState check agar cacheCurrentUI tetap terpanggil
+  // baik saat halaman sudah selesai maupun masih loading.
+  if (document.readyState === 'complete') {
+    // Halaman sudah selesai load saat content script diinjeksi
     cacheCurrentUI()
-  })
+  } else {
+    // Masih loading (injection awal atau reload cepat)
+    window.addEventListener('load', () => cacheCurrentUI(), { once: true })
+  }
 
   // Dengarkan setiap klik di halaman
   document.addEventListener('click', async (e) => {
@@ -81,14 +131,21 @@ export function initOfflineNavigation(): void {
 
     const url = new URL(link.href)
 
-    // Pastikan link tersebut menuju domain yang sama (selaras.tubankab.go.id)
-    if (url.hostname === window.location.hostname) {
-      // JIKA SEDANG OFFLINE: Cegat navigasinya!
-      if (!navigator.onLine) {
-        e.preventDefault() // Batalkan request ke server Laravel
+    // Pastikan link tersebut menuju domain yang sama
+    if (
+      ALLOWED_HOSTNAMES.includes(url.hostname) &&
+      url.hostname === window.location.hostname
+    ) {
+      // JIKA SEDANG ONLINE: Cache halaman tujuan sebelum berpindah
+      // (cache halaman SAAT INI sudah dilakukan saat load)
+      if (navigator.onLine) {
+        // Cache halaman saat ini ulang sebelum pindah (data terbaru)
+        await cacheCurrentUI()
+      } else {
+        // JIKA SEDANG OFFLINE: Cegat navigasinya!
+        e.preventDefault()
         await injectOfflineUI(url.pathname)
       }
-      // Jika online, biarkan browser bekerja seperti biasa
     }
   })
 }

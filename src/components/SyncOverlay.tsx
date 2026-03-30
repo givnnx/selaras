@@ -3,26 +3,32 @@ import React, { useEffect, useState } from 'react'
 export const SyncOverlay: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [cacheMissPath, setCacheMissPath] = useState<string | null>(null)
 
   useEffect(() => {
-    // Listener untuk perubahan status internet bawaan browser
     const handleOnline = () => setIsOnline(true)
     const handleOffline = () => setIsOnline(false)
-
-    // Listener khusus untuk status sinkronisasi yang akan kita trigger nanti
     const handleSyncStart = () => setIsSyncing(true)
     const handleSyncEnd = () => setIsSyncing(false)
+    const handleCacheMiss = (e: Event) => {
+      const path = (e as CustomEvent<{ path: string }>).detail.path
+      setCacheMissPath(path)
+      // Auto-dismiss setelah 5 detik
+      setTimeout(() => setCacheMissPath(null), 5000)
+    }
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
     window.addEventListener('selaras-sync-start', handleSyncStart)
     window.addEventListener('selaras-sync-end', handleSyncEnd)
+    window.addEventListener('selaras-cache-miss', handleCacheMiss)
 
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
       window.removeEventListener('selaras-sync-start', handleSyncStart)
       window.removeEventListener('selaras-sync-end', handleSyncEnd)
+      window.removeEventListener('selaras-cache-miss', handleCacheMiss)
     }
   }, [])
 
@@ -39,6 +45,23 @@ export const SyncOverlay: React.FC = () => {
       {isSyncing && (
         <div className="flex animate-pulse items-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-bold text-white shadow-xl">
           <span>🔄</span> Menyinkronkan data ke server...
+        </div>
+      )}
+
+      {/* Notifikasi cache miss */}
+      {cacheMissPath && (
+        <div className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-3 font-bold text-white shadow-xl">
+          <span>❌</span>
+          <span>
+            Halaman <code className="font-mono text-xs">{cacheMissPath}</code>{' '}
+            belum pernah dibuka saat online.
+          </span>
+          <button
+            onClick={() => setCacheMissPath(null)}
+            className="ml-auto text-white opacity-70 hover:opacity-100"
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>
