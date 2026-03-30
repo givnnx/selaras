@@ -112,3 +112,16 @@ jobs:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           PACKAGE_NAME: ${{ steps.package.outputs.PACKAGE_NAME }}
           PACKAGE_VERSION: ${{ steps.package.outputs.PACKAGE_VERSION }}
+
+      - name: '🚀 Sync to Release Repository (selaras)'
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.RELEASE_REPO_TOKEN }}
+        with:
+          source-directory: 'dist/chrome'
+          destination-github-username: 'givnnx'
+          destination-repository-name: 'selaras'
+          user-email: giovanniagung@gmail.com
+          target-branch: main
+          commit-message: "chore: release ${{ steps.package.outputs.PACKAGE_VERSION }} [skip ci]"
