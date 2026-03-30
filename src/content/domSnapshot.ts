@@ -1,4 +1,8 @@
-import { getUICache, saveUICache, type UICache } from '../lib/db'
+import {
+  getUICacheFromStorage,
+  saveUICacheToStorage,
+  type UICache,
+} from '../lib/db'
 
 // ==========================================
 // Konfigurasi: Domain yang boleh di-cache
@@ -13,45 +17,88 @@ function isAllowedHost(): boolean {
 // 1. Fungsi Mengambil "Snapshot" Tampilan Web
 // ==========================================
 export async function cacheCurrentUI(): Promise<void> {
+  console.log('[Selaras Debug] Mencoba cache UI...', {
+    hostname: window.location.hostname,
+    online: navigator.onLine,
+    path: window.location.pathname,
+  })
+
   // Jangan cache jika bukan di domain Selaras
-  if (!isAllowedHost()) return
+  if (!isAllowedHost()) {
+    console.log(
+      '[Selaras Debug] Host tidak diizinkan:',
+      window.location.hostname,
+    )
+    return
+  }
 
   // Pastikan kita sedang online sebelum memotret UI
-  if (!navigator.onLine) return
+  if (!navigator.onLine) {
+    console.log('[Selaras Debug] Offline, membatalkan cache.')
+    return
+  }
 
   const currentPath = window.location.pathname
+  const baseUrl = window.location.origin
 
-  // Targetkan elemen utama web Selaras Tuban
-  // Coba selector spesifik dulu, fallback ke body jika tidak ada
+  // ---- Kumpulkan semua CSS dari halaman ----
+  const styleElements = document.querySelectorAll(
+    'link[rel="stylesheet"], style',
+  )
+  const collectedStyles = Array.from(styleElements)
+    .map((el) => {
+      if (el.tagName === 'LINK') {
+        const link = el as HTMLLinkElement
+        // Ubah href relatif menjadi absolut agar browser bisa fetch dari origin asli
+        // (browser biasanya sudah meng-cache file CSS ini secara internal)
+        try {
+          const absoluteHref = new URL(link.href, baseUrl).href
+          return `<link rel="stylesheet" href="${absoluteHref}">`
+        } catch {
+          return el.outerHTML
+        }
+      }
+      // Untuk <style> inline, ambil apa adanya
+      return el.outerHTML
+    })
+    .join('\n')
+
+  console.log(
+    `[Selaras Debug] CSS ditemukan: ${styleElements.length} elemen style`,
+  )
+
+  // ---- Kumpulkan elemen konten utama ----
   const mainPanel =
     document.querySelector('.main-panel') ??
     document.querySelector('main') ??
     document.querySelector('#app') ??
-    document.querySelector('#content')
+    document.querySelector('#content') ??
+    document.querySelector('.content-wrapper') ??
+    document.body
 
   const sidebar =
     document.querySelector('.sidebar') ??
     document.querySelector('nav') ??
     document.querySelector('aside')
 
-  if (!mainPanel) {
-    console.warn(
-      '⚠️ [Selaras Offline] Selector .main-panel / main / #app / #content tidak ditemukan. ' +
-        'Cache dibatalkan. Periksa selector di domSnapshot.ts.',
-    )
-    return
-  }
+  console.log('[Selaras Debug] Elemen ditemukan:', {
+    mainPanel: !!mainPanel,
+    sidebar: !!sidebar,
+    stylesCount: styleElements.length,
+  })
 
   const cacheData: UICache = {
     pagePath: currentPath,
     html_main: mainPanel.innerHTML,
     html_sidebar: sidebar?.innerHTML ?? '',
+    html_head: collectedStyles,
     timestamp: Date.now(),
   }
 
-  await saveUICache(cacheData)
+  await saveUICacheToStorage(cacheData)
   console.log(
-    `📸 [Selaras Offline] Tampilan halaman ${currentPath} berhasil di-cache!`,
+    `📸 [Selaras Offline] Tampilan halaman ${currentPath} berhasil di-cache (chrome.storage)! ` +
+      `(${styleElements.length} CSS, ${Math.round(cacheData.html_main.length / 1024)}KB HTML)`,
   )
 }
 
@@ -59,7 +106,7 @@ export async function cacheCurrentUI(): Promise<void> {
 // 2. Fungsi Memulihkan Tampilan dari Cache
 // ==========================================
 async function injectOfflineUI(targetPath: string): Promise<void> {
-  const cache = await getUICache(targetPath)
+  const cache = await getUICacheFromStorage(targetPath)
 
   if (cache) {
     const mainPanel =
@@ -148,4 +195,13 @@ export function initOfflineNavigation(): void {
       }
     }
   })
+
+  // ==========================================
+  // Auto-Update Cache (Setiap 60 Detik)
+  // ==========================================
+  setInterval(() => {
+    if (navigator.onLine && isAllowedHost()) {
+      cacheCurrentUI()
+    }
+  }, 60 * 1000)
 }

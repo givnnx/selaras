@@ -21,6 +21,7 @@ export interface UICache {
   pagePath: string
   html_main: string
   html_sidebar: string
+  html_head: string // <style> dan <link rel="stylesheet"> dari halaman asli
   timestamp: number
 }
 
@@ -102,7 +103,7 @@ export async function addAnggotaToDraft(
 }
 
 // ==========================================
-// 4. Fungsi CRUD untuk UI Cache (Mode Offline)
+// 4. Fungsi CRUD untuk UI Cache (Mode Offline) — IndexedDB (legacy)
 // ==========================================
 export async function saveUICache(cache: UICache) {
   const db = await initDB()
@@ -113,4 +114,50 @@ export async function saveUICache(cache: UICache) {
 export async function getUICache(pagePath: string) {
   const db = await initDB()
   return await db.get('ui_cache', pagePath)
+}
+
+// ==========================================
+// 5. UI Cache via chrome.storage.local
+//    Diakses oleh: content script, service worker, offline page
+// ==========================================
+const UI_CACHE_PREFIX = 'ui_cache:'
+
+export async function saveUICacheToStorage(cache: UICache): Promise<void> {
+  try {
+    cache.timestamp = Date.now()
+    const key = `${UI_CACHE_PREFIX}${cache.pagePath}`
+    await chrome.storage.local.set({ [key]: cache })
+  } catch (error: any) {
+    if (error?.message?.includes('Extension context invalidated')) {
+      console.warn('[Selaras] Ekstensi di-reload. Harap refresh halaman ini.')
+    } else {
+      console.error('[Selaras] Gagal menyimpan cache:', error)
+    }
+  }
+}
+
+export async function getUICacheFromStorage(
+  pagePath: string,
+): Promise<UICache | undefined> {
+  try {
+    const key = `${UI_CACHE_PREFIX}${pagePath}`
+    const result = await chrome.storage.local.get(key)
+    return result[key] as UICache | undefined
+  } catch (error: any) {
+    if (error?.message?.includes('Extension context invalidated')) {
+      console.warn('[Selaras] Ekstensi di-reload. Harap refresh halaman ini.')
+    }
+    return undefined
+  }
+}
+
+export async function getAllCachedPaths(): Promise<string[]> {
+  try {
+    const all = await chrome.storage.local.get(null)
+    return Object.keys(all)
+      .filter((k) => k.startsWith(UI_CACHE_PREFIX))
+      .map((k) => k.replace(UI_CACHE_PREFIX, ''))
+  } catch (error) {
+    return []
+  }
 }
