@@ -30,3 +30,11 @@ coverage
 .env.local
 .env.development
 .env.production
+
+# Playwright
+/playwright-report/
+/test-results/
+/playwright/.auth/
+/.auth_profile/
+/.test_clean_profile/
+/.test_profile/
