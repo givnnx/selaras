@@ -45,17 +45,19 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   if (!ALLOWED_HOSTNAMES.includes(url.hostname)) return
 
   console.log(
-    `[service-worker] Navigasi gagal ke ${url.pathname}, mencari cache...`,
+    `[service-worker] Navigasi gagal ke ${url.pathname}${url.search}, mencari cache...`,
   )
 
-  // Cek apakah ada cache untuk halaman ini
-  const cacheKey = `${UI_CACHE_PREFIX}${url.pathname}`
+  const fullPath = url.pathname + url.search
+
+  // Cek apakah ada cache UI dasar untuk rute ini (dengan parameter query lengkap)
+  const cacheKey = `${UI_CACHE_PREFIX}${fullPath}`
   const result = await chrome.storage.local.get(cacheKey)
 
   if (result[cacheKey]) {
     // Redirect ke halaman offline extension
     const offlinePage = chrome.runtime.getURL(
-      `pages/offline.html?path=${encodeURIComponent(url.pathname)}`,
+      `pages/offline.html?path=${encodeURIComponent(fullPath)}`,
     )
 
     console.log(`[service-worker] Cache ditemukan! Redirect ke ${offlinePage}`)

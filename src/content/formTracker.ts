@@ -11,7 +11,23 @@ import { compressImage } from '../lib/compressor'
 // ==========================================
 export function getFormIdFromUrl(): string | null {
   const urlParams = new URLSearchParams(window.location.search)
-  return urlParams.get('no_kk')
+  let no_kk = urlParams.get('no_kk')
+
+  // Jika tidak ditemukan secara normal, cek apakah kita sedang di halaman ekstensi (Offline Mode)
+  // di mana URL aslinya dibungkus di dalam parameter '?path='
+  if (!no_kk) {
+    const pathParam = urlParams.get('path')
+    if (pathParam) {
+      try {
+        const pseudoUrl = new URL(pathParam, 'http://dummy.local')
+        no_kk = pseudoUrl.searchParams.get('no_kk')
+      } catch {
+        // abaikan error parsing URL
+      }
+    }
+  }
+
+  return no_kk
 }
 
 // ==========================================

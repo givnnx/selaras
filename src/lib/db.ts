@@ -21,6 +21,8 @@ export interface UICache {
   pagePath: string
   html_main: string
   html_sidebar: string
+  html_body?: string // Menampung struktur utuh dari body
+  body_class?: string // Menampung class dari body (penting untuk CSS layout)
   html_head: string // <style> dan <link rel="stylesheet"> dari halaman asli
   timestamp: number
 }
@@ -160,4 +162,16 @@ export async function getAllCachedPaths(): Promise<string[]> {
   } catch (error) {
     return []
   }
+}
+
+// ==========================================
+// 6. Force Offline Mode State
+// ==========================================
+export async function setForceOfflineMode(isOffline: boolean): Promise<void> {
+  await chrome.storage.local.set({ force_offline_mode: isOffline })
+}
+
+export async function getForceOfflineMode(): Promise<boolean> {
+  const result = await chrome.storage.local.get('force_offline_mode')
+  return !!result.force_offline_mode
 }
