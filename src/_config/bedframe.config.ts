@@ -20,7 +20,8 @@ export default createBedframe({
     options: 'full-page',
     manifest: [chrome, brave, opera, edge, firefox, safari],
     pages: {
-      overlay: 'src/pages/main.html',
+      overlay: 'pages/main.html',
+      options: 'pages/options.html',
     },
   },
   development: {
