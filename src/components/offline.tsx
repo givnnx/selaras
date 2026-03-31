@@ -1,26 +1,96 @@
 import React, { useEffect, useState } from 'react'
+
+// PENTING: Patch untuk Mencegah CPU SPIKE saat Development (Vite HMR Bug)
+// CRXJS Vite Plugin memiliki bug di mana ia terjebak dalam loop tak terbatas
+// jika koneksi websocket gagal di halaman chrome-extension:// yang memiliki query string (?path=...)
+if (import.meta.env.DEV) {
+  const originalError = console.error
+  console.error = (...args: any[]) => {
+    const msg = args[0] ? String(args[0]) : ''
+    // Jika Vite gagal connect websocket, cegah ia mengeluh terus-menerus
+    if (
+      msg.includes('WebSocket') ||
+      msg.includes("reading 'send'") ||
+      msg.includes('failed to connect to websocket')
+    ) {
+      return
+    }
+    if (
+      args[0] instanceof Error &&
+      args[0].message.includes("reading 'send'")
+    ) {
+      return
+    }
+    originalError.apply(console, args)
+  }
+
+  window.addEventListener('unhandledrejection', (e) => {
+    if (
+      e.reason &&
+      e.reason.message &&
+      e.reason.message.includes("reading 'send'")
+    ) {
+      e.preventDefault() // Hentikan pelemparan error ke console.error yang memicu loop
+    }
+  })
+}
+
 import { createRoot } from 'react-dom/client'
 import {
   getUICacheFromStorage,
   getAllCachedPaths,
   type UICache,
 } from '@/lib/db'
+import { restoreFormFromDraft, initFormTracker } from '@/content/formTracker'
+import { NavbarToggle } from './NavbarToggle'
+import { SyncOverlay } from './SyncOverlay'
 
 function OfflinePage() {
   const [cache, setCache] = useState<UICache | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cachedPaths, setCachedPaths] = useState<string[]>([])
-  const [pagePath, setPagePath] = useState('')
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const path = params.get('path') || '/'
-    setPagePath(path)
+    // Gunakan cara loss-less untuk mengekstrak path dari URL query,
+    // karena URLSearchParams bisa merusak tanda '+' (menjadi spasi) dan memotong string jika ada karakter ambigu
+    let rawSearch = window.location.search
+    if (rawSearch.startsWith('?path=')) {
+      rawSearch = rawSearch.substring(6) // potong '?path='
+    }
+    const rawPath = rawSearch ? decodeURIComponent(rawSearch) : '/'
 
     async function loadCache() {
       try {
-        const data = await getUICacheFromStorage(path)
+        let data = await getUICacheFromStorage(rawPath)
+
+        // --- FALLBACK PENCARIAN CACHE ---
+        if (!data) {
+          const paths = await getAllCachedPaths()
+          const matchedPath = paths.find((p) => {
+            try {
+              return (
+                p === rawPath ||
+                decodeURIComponent(p) === rawPath ||
+                p === encodeURIComponent(rawPath)
+              )
+            } catch {
+              return false
+            }
+          })
+          if (matchedPath) {
+            data = await getUICacheFromStorage(matchedPath)
+          } else {
+            // Fallback Ekstrem: Jika ini URL form yang panjang dan kacau tokennya,
+            // ambil struktur HTML dari sembarang "keluarga/form" yang ada agar halamannya tetap tampil!
+            const basePath = rawPath.split('?')[0]
+            if (basePath.includes('/survei-keluarga/form')) {
+              const fallbackPath = paths.find((p) => p.startsWith(basePath))
+              if (fallbackPath) data = await getUICacheFromStorage(fallbackPath)
+            }
+          }
+        }
+
         if (data) {
           setCache(data)
 
@@ -35,8 +105,13 @@ function OfflinePage() {
               '[Selaras Offline] CSS berhasil di-injeksi ke halaman offline.',
             )
           }
+
+          // Pulihkan class tag <body> agar struktur layout bawaan web berfungsi
+          if (data.body_class) {
+            document.body.className = data.body_class
+          }
         } else {
-          setError(`Tidak ada cache untuk halaman: ${path}`)
+          setError(`Tidak ada struktur UI cache untuk rute: ${rawPath}`)
           const paths = await getAllCachedPaths()
           setCachedPaths(paths)
         }
@@ -48,7 +123,56 @@ function OfflinePage() {
     }
 
     loadCache()
-  }, [])
+
+    // Interceptor klik khusus untuk halaman offline
+    // Mencegah link dalam HTML cache mengarah ke URL asli atau 404 pada local extension
+    const handleOfflineClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const link = target.closest('a')
+      if (!link || !link.href || link.target === '_blank') return
+
+      try {
+        const url = new URL(link.href)
+
+        // Biarkan link yang mengarah secara eksplisit ke ?path=... (navigasi di dalam ekstensi UI)
+        if (url.searchParams.has('path')) return
+
+        // Cek target hostname: jika link menuju domain ekstensi (relative path web asli) atau selaras
+        const isInternalHost =
+          url.hostname === window.location.hostname ||
+          url.hostname === 'selaras.tubankab.go.id'
+
+        if (isInternalHost) {
+          e.preventDefault()
+          const fullTargetPath = url.pathname + url.search
+          // Arahkan kembali ke tampilan offline ekstensi lewat param ?path=
+          window.location.replace(`?path=${encodeURIComponent(fullTargetPath)}`)
+        }
+      } catch (err) {
+        // Abaikan error parse URL
+      }
+    }
+
+    document.addEventListener('click', handleOfflineClick, { capture: true })
+
+    return () => {
+      document.removeEventListener('click', handleOfflineClick, {
+        capture: true,
+      })
+    }
+  }, []) // <- the end of first useEffect
+
+  // Efek untuk memanggil data form IndexedDB ke dalam form HTML yang berhasil di-render
+  useEffect(() => {
+    if (cache && !loading) {
+      setTimeout(() => {
+        restoreFormFromDraft().catch((err) => {
+          console.warn('[Selaras Offline] Gagal merestore form:', err)
+        })
+        initFormTracker() // PENTING: Pasang alat penyedot ketikan agar bisa menyimpan ke IndexedDB saat Offline!
+      }, 50)
+    }
+  }, [cache, loading])
 
   if (loading) {
     return (
@@ -97,44 +221,44 @@ function OfflinePage() {
     )
   }
 
-  const timeAgo = cache ? formatTimeAgo(cache.timestamp) : ''
-
   return (
     <div>
-      {/* Banner Offline */}
-      <div style={styles.banner}>
-        <div style={styles.bannerContent}>
-          <span style={{ fontWeight: 'bold' }}>⚠️ Mode Offline</span>
-          <span style={{ fontSize: '0.85rem', opacity: 0.9 }}>
-            Menampilkan cache dari: <strong>{pagePath}</strong>
-            {timeAgo && ` • Disimpan ${timeAgo}`}
-          </span>
-        </div>
+      <style>{`
+        /* Sembunyikan switch dan overlay MATI bawaan dari cache HTML orisinil */
+        #root #selaras-navbar-toggle-root, 
+        #root #selaras-offline-overlay-root { 
+          display: none !important; 
+        }
+      `}</style>
+
+      {/* UI Kendali Mengambang untuk Mode Offline (HIDUP) */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '20px',
+          right: '350px',
+          zIndex: 999999,
+        }}
+      >
+        <NavbarToggle />
       </div>
 
-      {/* Sidebar */}
-      {cache?.html_sidebar && (
-        <div dangerouslySetInnerHTML={{ __html: cache.html_sidebar }} />
-      )}
+      <SyncOverlay />
 
-      {/* Main Content */}
-      <div dangerouslySetInnerHTML={{ __html: cache?.html_main ?? '' }} />
+      {cache?.html_body ? (
+        /* Render utuh seluruh struktur <body> web aslinya */
+        <div dangerouslySetInnerHTML={{ __html: cache.html_body }} />
+      ) : (
+        <>
+          {/* Fallback rendering untuk perangkat yang menyimpan versi cache lama */}
+          {cache?.html_sidebar && (
+            <div dangerouslySetInnerHTML={{ __html: cache.html_sidebar }} />
+          )}
+          <div dangerouslySetInnerHTML={{ __html: cache?.html_main ?? '' }} />
+        </>
+      )}
     </div>
   )
-}
-
-// ==========================================
-// Utilitas
-// ==========================================
-function formatTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return `${seconds} detik yang lalu`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} menit yang lalu`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} jam yang lalu`
-  const days = Math.floor(hours / 24)
-  return `${days} hari yang lalu`
 }
 
 // ==========================================
@@ -207,6 +331,17 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '0.5rem',
     maxWidth: '1200px',
     margin: '0 auto',
+  },
+  btnReturn: {
+    padding: '0.5rem 1rem',
+    background: '#fff',
+    color: '#d97706',
+    border: 'none',
+    borderRadius: '0.5rem',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
   },
 }
 
