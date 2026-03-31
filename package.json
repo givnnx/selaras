@@ -16,6 +16,9 @@
     "release": "gh release create $npm_package_name@$npm_package_version ./dist/*.zip --generate-notes",
     "fix": "bun run format && bun run lint",
     "test": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:auth-capture": "bun run scripts/capture-auth.ts",
     "commit": "lint-staged && cz",
     "convert:safari": "xcrun safari-web-extension-converter dist/safari --project-location . --app-name $npm_package_name-safari"
   },
@@ -44,7 +47,9 @@
     "@commitlint/cli": "latest",
     "@commitlint/config-conventional": "latest",
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "latest",
+    "@tailwindcss/vite": "latest",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
@@ -58,6 +63,7 @@
     "commitizen": "latest",
     "concurrently": "latest",
     "cz-conventional-changelog": "latest",
+    "dotenv": "^17.3.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -67,22 +73,23 @@
     "lint-staged": "latest",
     "oxfmt": "latest",
     "oxlint": "latest",
+    "playwright-extra": "^4.3.6",
     "postcss": "latest",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "tailwindcss": "latest",
     "typescript": "latest",
     "typescript-eslint": "^8.57.1",
     "vite": "latest",
-    "vitest": "latest",
-    "@tailwindcss/vite": "latest",
-    "tailwindcss": "latest"
+    "vitest": "latest"
   },
   "description": "Make it offline compatible",
   "license": "MIT",
   "author": {
     "name": "givnnx",
     "email": "giovanniagung@gmail.com",
-    "url": "giovanniagung.my.id"
+    "url": "https://giovanniagung.my.id"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,css,html,json}": "oxfmt --no-error-on-unmatched-pattern",
